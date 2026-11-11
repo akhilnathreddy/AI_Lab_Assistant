@@ -194,12 +194,11 @@ def plot_suite(runs: pd.DataFrame, name: str, threshold: float, title: str,
         frac = [(t <= k).mean() for k in x]
         axes[1].step(x, frac, where="post", color=color, lw=2, label=m)
 
-    axes[0].axhline(global_max, color="#888", ls=":", lw=1)
-    axes[0].text(budget, global_max, " best in dataset", va="center", ha="right",
-                 fontsize=8, color="#666", backgroundcolor="white")
-    axes[0].axhline(threshold, color="#888", ls="--", lw=1)
-    axes[0].text(budget, threshold, " top 1%", va="center", ha="right",
-                 fontsize=8, color="#666", backgroundcolor="white")
+    # Reference lines, labelled at the left where the curves are still low.
+    for yref, text, ls in ((global_max, "best in dataset", ":"), (threshold, "top 1%", "--")):
+        axes[0].axhline(yref, color="#888", ls=ls, lw=1)
+        axes[0].text(budget * 0.02, yref + 0.4, text, va="bottom", ha="left",
+                     fontsize=8, color="#666")
     style_axes(axes[0], "Experiments run", "Best yield found so far (%)",
                "Mean best yield (band = interquartile range)")
     axes[0].legend(frameon=False, loc="lower right", fontsize=9)
