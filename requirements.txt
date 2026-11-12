@@ -1,0 +1,12 @@
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+scikit-learn>=1.4
+rdkit>=2023.9
+openpyxl>=3.1
+matplotlib>=3.8
+seaborn>=0.13
+streamlit>=1.46
+altair>=5.0
+tabulate>=0.9
+pytest>=7.4
