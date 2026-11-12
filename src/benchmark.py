@@ -4,10 +4,12 @@ Usage (from the repository root)::
 
     python -m src.benchmark --suite main --seeds 30 --budget 100
     python -m src.benchmark --suite all  --seeds 30
+    python -m src.benchmark --dataset suzuki_miyaura --suite main --seeds 30
 
-Each suite writes ``results/runs/<suite>.csv`` (one row per experiment of
-every run) and ``results/figures/<suite>_*.png`` plus a metrics table
-``results/<suite>_metrics.md``.
+Each suite writes ``results/runs/[<dataset>_]<suite>.csv`` (one row per experiment of
+every run) and ``results/figures/[<dataset>_]<suite>_benchmark.png`` plus a metrics table
+``results/[<dataset>_]<suite>_metrics.md``. The dataset prefix is omitted for
+the default Buchwald-Hartwig dataset.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import load_dataset
+from .data import DATASETS, DEFAULT_DATASET, get_spec, load_dataset
 from .features import encode
 from .optimizers import BayesOpt, RandomSearch, Strategy, run_campaign
 from .virtual_lab import VirtualLab
@@ -85,32 +87,38 @@ def suites() -> dict[str, list[MethodSpec]]:
 # ---------------------------------------------------------------------------
 # Worker
 # ---------------------------------------------------------------------------
-_DATA: pd.DataFrame | None = None
-_X: dict[str, np.ndarray] = {}
+_DATA: dict[str, pd.DataFrame] = {}
+_X: dict[tuple[str, str], np.ndarray] = {}
 
 
 def _init_worker():
-    global _DATA, _LIMITS
+    global _LIMITS
     # One BLAS thread per worker: otherwise every process spawns a thread per
     # core and the machine thrashes.
     from threadpoolctl import threadpool_limits
     _LIMITS = threadpool_limits(1)
-    _DATA = load_dataset()
 
 
-def _features(encoding: str) -> np.ndarray:
-    if encoding not in _X:
-        _X[encoding] = encode(_DATA, encoding)[0]
-    return _X[encoding]
+def _data(dataset: str) -> pd.DataFrame:
+    if dataset not in _DATA:
+        _DATA[dataset] = load_dataset(dataset)
+    return _DATA[dataset]
+
+
+def _features(dataset: str, encoding: str) -> np.ndarray:
+    if (dataset, encoding) not in _X:
+        _X[dataset, encoding] = encode(_data(dataset), encoding)[0]
+    return _X[dataset, encoding]
 
 
 def _run_one(args) -> pd.DataFrame:
-    spec, seed, budget, n_init = args
-    lab = VirtualLab(_DATA, noise_sd=spec.noise_sd, seed=seed)
-    run_campaign(lab, _features(spec.encoding), spec.strategy, budget=budget,
+    spec, seed, budget, n_init, dataset = args
+    data = _data(dataset)
+    lab = VirtualLab(data, noise_sd=spec.noise_sd, seed=seed)
+    run_campaign(lab, _features(dataset, spec.encoding), spec.strategy, budget=budget,
                  n_init=n_init, batch_size=spec.batch_size, seed=seed)
     idx, measured = lab.observed()
-    true_y = _DATA["yield"].to_numpy()[idx]
+    true_y = data["yield"].to_numpy()[idx]
     return pd.DataFrame({
         "method": spec.label, "seed": seed,
         "experiment": np.arange(1, len(idx) + 1), "row": idx,
@@ -120,8 +128,9 @@ def _run_one(args) -> pd.DataFrame:
 
 
 def run_suite(name: str, specs: list[MethodSpec], seeds: int, budget: int,
-              n_init: int, processes: int) -> pd.DataFrame:
-    jobs = [(s, seed, budget, n_init) for s in specs for seed in range(seeds)]
+              n_init: int, processes: int, dataset: str = DEFAULT_DATASET) -> pd.DataFrame:
+    """Run every method x seed; ``name`` is the output stem (with dataset prefix)."""
+    jobs = [(s, seed, budget, n_init, dataset) for s in specs for seed in range(seeds)]
     t0 = time.time()
     with Pool(processes, initializer=_init_worker) as pool:
         frames = pool.map(_run_one, jobs, chunksize=1)
@@ -195,10 +204,11 @@ def plot_suite(runs: pd.DataFrame, name: str, threshold: float, title: str,
         axes[1].step(x, frac, where="post", color=color, lw=2, label=m)
 
     # Reference lines, labelled at the left where the curves are still low.
-    for yref, text, ls in ((global_max, "best in dataset", ":"), (threshold, "top 1%", "--")):
+    # "best" sits above its line and "top 1%" below, so they never collide.
+    for yref, text, ls, dy, va in ((global_max, "best in dataset", ":", 0.4, "bottom"),
+                                   (threshold, "top 1%", "--", -0.6, "top")):
         axes[0].axhline(yref, color="#888", ls=ls, lw=1)
-        axes[0].text(budget * 0.02, yref + 0.4, text, va="bottom", ha="left",
-                     fontsize=8, color="#666")
+        axes[0].text(budget * 0.02, yref + dy, text, va=va, ha="left", fontsize=8, color="#666")
     style_axes(axes[0], "Experiments run", "Best yield found so far (%)",
                "Mean best yield (band = interquartile range)")
     axes[0].legend(frameon=False, loc="lower right", fontsize=9)
@@ -213,7 +223,7 @@ def plot_suite(runs: pd.DataFrame, name: str, threshold: float, title: str,
 
 
 TITLES = {
-    "main": "Bayesian optimization vs random search (Buchwald–Hartwig, 3,955 reactions)",
+    "main": "Bayesian optimization vs random search ({title}, {n:,} reactions)",
     "encodings": "Does chemistry-aware featurization speed up the search?",
     "batch": "Running plates of 5 in parallel vs one experiment at a time",
     "acquisition": "Exploration vs exploitation: acquisition functions",
@@ -224,6 +234,7 @@ TITLES = {
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--suite", default="main", help="suite name or 'all'")
+    p.add_argument("--dataset", default=DEFAULT_DATASET, choices=list(DATASETS))
     p.add_argument("--seeds", type=int, default=30)
     p.add_argument("--budget", type=int, default=100)
     p.add_argument("--n-init", type=int, default=5)
@@ -231,32 +242,38 @@ def main(argv=None):
     p.add_argument("--plot-only", action="store_true", help="re-plot saved runs")
     args = p.parse_args(argv)
 
-    data = load_dataset()
+    ds = get_spec(args.dataset)
+    data = load_dataset(ds.name)
     lab = VirtualLab(data)
     threshold = lab.quantile_threshold(TOP_FRACTION)
     n_good = int((data["yield"] >= threshold).sum())
+    print(f"Dataset: {ds.title} ({len(data)} reactions)")
     print(f"Top-1% threshold: {threshold:.1f}% yield ({n_good} of {len(data)} reactions)")
     print(f"Random search needs {random_search_expectation(len(data), n_good):.0f} "
           f"experiments on average to hit one (analytic).")
 
     all_suites = suites()
     names = list(all_suites) if args.suite == "all" else [args.suite]
-    for name in names:
+    for suite in names:
+        name = ds.prefix + suite
+        title = TITLES.get(suite, suite).format(title=ds.title, n=len(data))
+        if suite != "main" and ds.prefix:
+            title = f"{ds.title}: {title}"
         if args.plot_only:
             runs = pd.read_csv(RUNS_DIR / f"{name}.csv")
         else:
-            runs = run_suite(name, all_suites[name], args.seeds, args.budget,
-                             args.n_init, args.processes)
+            runs = run_suite(name, all_suites[suite], args.seeds, args.budget,
+                             args.n_init, args.processes, ds.name)
         table = metrics_table(runs, threshold)
         md = table.to_markdown(index=False)
         (RESULTS_DIR / f"{name}_metrics.md").write_text(
-            f"# {TITLES.get(name, name)}\n\n"
+            f"# {title}\n\n"
             f"{runs['seed'].nunique()} seeds, budget {runs['experiment'].max()}, "
             f"top-1% threshold = {threshold:.1f}% yield. Values are mean ± std of "
             f"the best yield found after N experiments.\n\n{md}\n"
         )
         print(md)
-        plot_suite(runs, name, threshold, TITLES.get(name, name), lab.global_max)
+        plot_suite(runs, name, threshold, title, lab.global_max)
 
 
 if __name__ == "__main__":

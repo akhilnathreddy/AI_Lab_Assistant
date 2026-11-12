@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .data import COMPONENTS
+from .data import components_of
 
 
 @dataclass
@@ -58,7 +58,7 @@ class VirtualLab:
 
     def conditions(self, idx: int) -> dict:
         row = self.table.iloc[int(idx)]
-        return {c: row[c] for c in COMPONENTS if c in row}
+        return {c: row[c] for c in components_of(self.table)}
 
     # --- running experiments -----------------------------------------
     def run(self, idx: int) -> float:

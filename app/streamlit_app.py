@@ -15,7 +15,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from src.data import COMPONENTS, load_dataset  # noqa: E402
+from src.data import DATASETS, get_spec, load_dataset  # noqa: E402
 from src.features import encode  # noqa: E402
 from src.optimizers import BayesOpt, RandomSearch  # noqa: E402
 from src.virtual_lab import VirtualLab  # noqa: E402
@@ -30,30 +30,39 @@ METHODS = {
 }
 ENCODINGS = {"One-hot": "onehot", "RDKit descriptors": "descriptors",
              "Morgan fingerprints": "fingerprint"}
-NICE = {"ligand": "Ligand", "base": "Base", "additive": "Additive", "aryl_halide": "Aryl halide"}
 
 
 @st.cache_data
-def data() -> pd.DataFrame:
-    return load_dataset()
+def load(dataset: str) -> pd.DataFrame:
+    return load_dataset(dataset)
 
 
 @st.cache_data
-def features(encoding: str) -> np.ndarray:
-    return encode(data(), encoding)[0]
+def features(dataset: str, encoding: str) -> np.ndarray:
+    return encode(load(dataset), encoding)[0]
 
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.header("Settings")
+dataset = st.sidebar.selectbox("Reaction", list(DATASETS),
+                               format_func=lambda k: DATASETS[k].reaction)
+spec = get_spec(dataset)
+COMPONENTS, NICE = list(spec.components), spec.labels
+
+
+def data() -> pd.DataFrame:
+    return load(dataset)
+
+
 method_name = st.sidebar.selectbox("Method", list(METHODS))
 encoding_name = st.sidebar.selectbox("Encoding", list(ENCODINGS),
                                      disabled=method_name == "Random search")
 n_init = st.sidebar.slider("Initial random experiments", 1, 20, 5)
 batch = st.sidebar.select_slider("Experiments per click (plate size)", [1, 2, 5, 10], value=1)
 seed = st.sidebar.number_input("Random seed", 0, 10_000, 0)
-config = (method_name, encoding_name, n_init, seed)
+config = (dataset, method_name, encoding_name, n_init, seed)
 
 if st.session_state.get("config") != config or st.sidebar.button("Reset campaign"):
     st.session_state.config = config
@@ -67,19 +76,22 @@ if st.session_state.get("config") != config or st.sidebar.button("Reset campaign
 
 lab: VirtualLab = st.session_state.lab
 rand_lab: VirtualLab = st.session_state.rand_lab
-X = features(ENCODINGS[encoding_name])
+X = features(dataset, ENCODINGS[encoding_name])
 threshold = lab.quantile_threshold(0.01)
 
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 st.title("⚗️ AI Lab Assistant")
+n_top = int((data()["yield"] >= threshold).sum())
+choices = ", ".join(NICE[c].lower() for c in COMPONENTS[:-1]) + f" and {NICE[COMPONENTS[-1]].lower()}"
+author, journal = spec.citation.split(", ")
 st.markdown(
-    "Finding the best conditions for a **Buchwald–Hartwig C–N coupling** among "
-    f"**{lab.n_candidates:,}** combinations of ligand, base, additive and aryl halide. "
-    "Every reaction was really run (Ahneman *et al.*, *Science* 2018); this "
-    "*virtual lab* simply reveals the measured yield when the optimizer asks for it. "
-    f"Only **40 reactions (1%)** reach **{threshold:.1f}%** yield or more."
+    f"Finding the best conditions for a **{spec.reaction}** among "
+    f"**{lab.n_candidates:,}** combinations of {choices}. "
+    f"Every reaction was really run ({author.replace('et al.', '*et al.*')}, *{journal.split()[0]}* "
+    f"{journal.split()[-1]}); this *virtual lab* simply reveals the measured yield when the "
+    f"optimizer asks for it. Only **{n_top} reactions (1%)** reach **{threshold:.1f}%** yield or more."
 )
 
 col_a, col_b, col_c = st.columns([1, 1, 2])
@@ -139,7 +151,7 @@ with right:
                       "Best yield (%)": rand_lab.best_so_far(), "Method": "Random search (comparison)"}),
     ])
     lines = alt.Chart(chart_df).mark_line(interpolate="step-after", strokeWidth=2.5).encode(
-        x=alt.X("Experiments:Q"),
+        x=alt.X("Experiments:Q", axis=alt.Axis(tickMinStep=1, format="d")),
         y=alt.Y("Best yield (%):Q", scale=alt.Scale(domain=[0, 100])),
         color=alt.Color("Method:N", scale=alt.Scale(range=["#0072B2", "#999999"]),
                         legend=alt.Legend(orient="bottom", title=None, labelLimit=400)),

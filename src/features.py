@@ -2,7 +2,7 @@
 
 Three encodings are provided:
 
-* ``onehot``      - one indicator per component choice (44 columns). Knows
+* ``onehot``      - one indicator per component choice. Knows
                     nothing about chemistry: every pair of ligands is equally
                     different.
 * ``descriptors`` - a small set of RDKit physico-chemical descriptors per
@@ -20,7 +20,7 @@ import pandas as pd
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Descriptors, rdFingerprintGenerator
 
-from .data import COMPONENTS, SMILES_COLS
+from .data import components_of
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -56,7 +56,7 @@ def _mol(smiles: str) -> Chem.Mol:
 
 def one_hot(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     blocks, names = [], []
-    for comp in COMPONENTS:
+    for comp in components_of(df):
         dummies = pd.get_dummies(df[comp], prefix=comp, dtype=float)
         blocks.append(dummies.to_numpy())
         names.extend(dummies.columns)
@@ -71,6 +71,8 @@ def _component_table(smiles: list[str], kind: str, n_bits: int) -> pd.DataFrame:
             mol = _mol(s)
             rows[s] = [float(f(mol)) for f in DESCRIPTOR_FUNCS.values()]
         table = pd.DataFrame.from_dict(rows, orient="index", columns=list(DESCRIPTOR_FUNCS))
+        # Partial charges are undefined (NaN) for some salts, e.g. CsF.
+        table = table.dropna(axis=1)
         table = table.loc[:, table.std(ddof=0) > 1e-9]  # drop constant columns
         return (table - table.mean()) / table.std(ddof=0)
     if kind == "fingerprint":
@@ -87,8 +89,8 @@ def chemistry_features(
     df: pd.DataFrame, kind: str = "descriptors", n_bits: int = 512
 ) -> tuple[np.ndarray, list[str]]:
     blocks, names = [], []
-    for comp in COMPONENTS:
-        col = SMILES_COLS[comp]
+    for comp in components_of(df):
+        col = f"{comp}_smiles"
         table = _component_table(sorted(df[col].unique()), kind, n_bits)
         blocks.append(table.loc[df[col]].to_numpy())
         names.extend(f"{comp}:{c}" for c in table.columns)

@@ -1,6 +1,6 @@
 # AI Lab Assistant: Bayesian reaction optimization
 
-**A Bayesian optimizer that finds a top-1% Buchwald–Hartwig reaction in a median of 14–18 experiments. Random search needs about 68 on average, and still fails in more than a third of runs after 100.**
+**A Bayesian optimizer that finds a top-1% Buchwald–Hartwig reaction in a median of 14–18 experiments. Random search needs about 68 on average, and still fails in more than a third of runs after 100. The result repeats on a second reaction (Suzuki–Miyaura): about 18 experiments, against about 69.**
 
 ![Bayesian optimization vs random search](results/figures/main_benchmark.png)
 
@@ -120,7 +120,23 @@ Each extension uses 30 seeds and a budget of 100, and each has its own chart in 
 
 *Takeaway:* the *median* run barely depends on the acquisition function. The difference shows up in the *worst* runs: purely exploitative strategies (greedy, β = 0.1) get stuck on a "good enough" plateau in 7% of runs and never find a top-1% reaction. Some exploration is cheap insurance.
 
-**d) Robustness to measurement noise** (an extra extension). ([chart](results/figures/noise_benchmark.png), [table](results/noise_metrics.md))
+**d) Second dataset: Suzuki–Miyaura.** ([chart](results/figures/suzuki_miyaura_main_benchmark.png), [table](results/suzuki_miyaura_main_metrics.md), [EDA](results/suzuki_miyaura_eda_summary.md))
+
+The same code, unchanged, on 3,696 Suzuki–Miyaura couplings (Perera et al., 2018): 4 electrophiles × 3 boron reagents × 11 ligands × 7 bases × 4 solvents. This search space is easier, since 17.8% of reactions exceed 80%, so the target is stricter: the top 1% need ≥ 96.2% yield (37 reactions).
+
+| Method (50 seeds) | Best after 10 | after 20 | Runs found top-1% | Median exps to top-1% |
+|---|---|---|---|---|
+| Random search | 88.8 ± 9.2 | 93.1 ± 4.7 | 68% | 61 (analytic: 69 median, 97 mean) |
+| BO: GP + EI | 90.8 ± 7.9 | 96.0 ± 3.1 | **100%** | **18** |
+| BO: RF + EI | **93.6 ± 4.8** | **96.5 ± 2.1** | **100%** | **18** |
+
+The encodings result also repeats ([chart](results/figures/suzuki_miyaura_encodings_benchmark.png), [table](results/suzuki_miyaura_encodings_metrics.md)): one-hot needs a median of 18 experiments, Morgan fingerprints 28 and RDKit descriptors 30.
+
+![Suzuki–Miyaura benchmark](results/figures/suzuki_miyaura_main_benchmark.png)
+
+*Takeaway:* the ~4× saving is not a quirk of one dataset. Both reactions land at a median of about 18 experiments, even though their search spaces have different sizes, different components and different shares of high-yield reactions.
+
+**e) Robustness to measurement noise** (an extra extension). ([chart](results/figures/noise_benchmark.png), [table](results/noise_metrics.md))
 
 Gaussian noise was added to every "measured" yield. Methods are still scored on the true yield of what they picked.
 
@@ -138,7 +154,7 @@ Gaussian noise was added to every "measured" yield. Methods are still scored on 
 - **Chemistry-aware features did not help the optimizer** in this setting (see 5a), even though they clearly help prediction on unseen reagents.
 - **Batch BO is less sample-efficient** than sequential BO. It saves rounds, not reagents.
 - **A virtual lab is not a real lab.** The candidate set is fixed and fully enumerated, so the optimizer can never propose a new reagent, temperature or concentration. Yields come from one high-throughput campaign with its own systematic errors, and real experiments fail in ways a lookup table never does.
-- **One dataset.** The Suzuki–Miyaura screen (Perera et al., 2018) is the obvious next benchmark to show the result generalizes.
+- **Two datasets, both from one type of experiment.** Both are fully enumerated high-throughput screens of Pd-catalysed couplings. Problems with continuous variables (temperature, concentration, time) are not tested here.
 - **The random initial design is naive.** A space-filling or chemist-chosen start could change the early-experiment numbers.
 
 ## Run it locally
@@ -151,33 +167,45 @@ pip install -r requirements.txt
 python -m pytest -q                          # unit tests (~10 s)
 streamlit run app/streamlit_app.py           # interactive demo
 python -m src.benchmark --suite main --seeds 10 --budget 60   # quick benchmark
+python -m src.benchmark --dataset suzuki_miyaura --suite main --seeds 10 --budget 60
 ./scripts/reproduce.sh                       # rebuild every table and figure (~25 min on 4 cores)
 ```
 
-The cleaned dataset is committed at `data/processed/buchwald_hartwig.csv`. `python -m src.data` re-downloads and re-cleans it from source.
+The cleaned datasets are committed in `data/processed/`. `python -m src.data` re-downloads and re-cleans them from source.
 
 ### Interactive demo
 
+![Demo: the optimizer finds a top-1% reaction at experiment 10](results/figures/demo.gif)
+
 `app/streamlit_app.py` provides:
 
+- a choice of reaction (Buchwald–Hartwig or Suzuki–Miyaura)
 - a **Run next experiment** button
 - the conditions the optimizer just chose and their yield
 - a live best-so-far chart against random search on the same budget
 - a table of what the model currently believes are the best untested reactions
 - a sidebar to pick the method, encoding, number of initial experiments and plate size
 
-**Live demo:** *add your Streamlit Community Cloud link here*. To deploy, push the repo to GitHub, go to share.streamlit.io, choose "New app", and point it at `app/streamlit_app.py`.
+**Live demo:** *add your Streamlit Community Cloud link here*.
+
+To deploy it for free:
+1. Merge this branch into `main` on GitHub.
+2. Go to [share.streamlit.io](https://share.streamlit.io) and choose **Create app → Deploy a public app from GitHub**.
+3. Pick this repository, branch `main`, and main file `app/streamlit_app.py`.
+4. Click **Deploy**.
+
+`requirements.txt` and `.streamlit/config.toml` are picked up automatically, and the processed data is committed, so no setup is needed.
 
 ## Repository layout
 
 ```
-data/processed/       cleaned conditions → yield table (with SMILES)
-src/data.py           download + cleaning, readable component names
+data/processed/       cleaned conditions → yield tables (with SMILES), one per dataset
+src/data.py           dataset registry, download + cleaning, readable component names
 src/features.py       one-hot, RDKit-descriptor and Morgan-fingerprint encodings
 src/virtual_lab.py    lookup-based experiment simulator (optional noise)
 src/optimizers.py     random search; BO with GP / RF surrogates, EI / UCB / greedy, batch (kriging believer)
 src/benchmark.py      repeated-seed benchmark suites → results/runs, results/*_metrics.md, figures
-scripts/01_eda.py     Phase 1 EDA figures + summary
+scripts/01_eda.py     Phase 1 EDA figures + summary (--dataset suzuki_miyaura for the second dataset)
 scripts/02_baseline_model.py   Phase 2 random-forest baselines with realistic splits
 scripts/reproduce.sh  rebuild everything
 app/streamlit_app.py  interactive demo
@@ -189,5 +217,5 @@ docs/                 project plan with progress, draft LinkedIn post
 
 - Ahneman, D. T., Estrada, J. G., Lin, S., Dreher, S. D., Doyle, A. G. "Predicting reaction performance in C–N cross-coupling using machine learning." *Science* 360, 186–190 (2018). The data used here is the SMILES-annotated copy from the [rxn_yields](https://github.com/rxn4chemistry/rxn_yields) repository.
 - Shields, B. J. et al. "Bayesian reaction optimization as a tool for chemical synthesis." *Nature* 590, 89–96 (2021). This paper was the main inspiration.
-- Perera, D. et al. "A platform for automated nanomole-scale reaction screening and micromole-scale synthesis in flow." *Science* 359, 429–434 (2018).
+- Perera, D. et al. "A platform for automated nanomole-scale reaction screening and micromole-scale synthesis in flow." *Science* 359, 429–434 (2018). The component table used here comes from the [EDBO](https://github.com/b-shields/edbo) repository (MIT licence). The screen's ligand-free and base-free controls are excluded.
 - Ginsbourger, D., Le Riche, R., Carraro, L. "Kriging is well-suited to parallelize optimization." (2010), the kriging-believer batch heuristic.

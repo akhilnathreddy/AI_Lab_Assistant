@@ -1,10 +1,14 @@
 """Phase 1: exploratory data analysis of the Buchwald-Hartwig screen.
 
-Writes figures to results/figures/ and a summary to results/eda_summary.md.
-Run from the repository root:  python scripts/01_eda.py
+Writes figures to results/figures/ and a summary to results/eda_summary.md
+(prefixed with the dataset name for non-default datasets).
+Run from the repository root:
+    python scripts/01_eda.py                          # Buchwald-Hartwig
+    python scripts/01_eda.py --dataset suzuki_miyaura
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -16,22 +20,23 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import seaborn as sns  # noqa: E402
 
-from src.data import COMPONENTS, load_dataset  # noqa: E402
+from src.data import DATASETS, DEFAULT_DATASET, get_spec, load_dataset  # noqa: E402
 from src.plotting import PALETTE, style_axes  # noqa: E402
 
 FIG = ROOT / "results" / "figures"
 FIG.mkdir(parents=True, exist_ok=True)
-LABELS = {"ligand": "Ligand", "base": "Base", "additive": "Additive", "aryl_halide": "Aryl halide"}
 
 
-def main():
-    df = load_dataset()
+def main(dataset: str = DEFAULT_DATASET):
+    spec = get_spec(dataset)
+    COMPONENTS, LABELS, pre = list(spec.components), spec.labels, spec.prefix
+    df = load_dataset(dataset)
     y = df["yield"]
     n_full = np.prod([df[c].nunique() for c in COMPONENTS])
     top1 = y.quantile(0.99)
 
     lines = [
-        "# EDA summary",
+        f"# EDA summary: {spec.reaction} ({spec.citation})",
         "",
         f"- Reactions: **{len(df)}** (full factorial would be {n_full}; "
         f"{n_full - len(df)} combinations are absent from the published data)",
@@ -55,22 +60,24 @@ def main():
     style_axes(ax, "Yield (%)", "Number of reactions",
                "High yields are rare: most conditions give < 50%")
     fig.tight_layout()
-    fig.savefig(FIG / "eda_yield_distribution.png", dpi=160)
+    fig.savefig(FIG / f"{pre}eda_yield_distribution.png", dpi=160)
     plt.close(fig)
 
     # 2. Yield by each variable --------------------------------------------
-    fig, axes = plt.subplots(1, 4, figsize=(16, 5), gridspec_kw={"width_ratios": [4, 3, 15, 22]},
-                             sharey=True)
-    for ax, comp in zip(axes, ["ligand", "base", "aryl_halide", "additive"]):
+    plot_order = sorted(COMPONENTS, key=lambda c: df[c].nunique())
+    widths = [max(df[c].nunique(), 3) for c in plot_order]
+    fig, axes = plt.subplots(1, len(plot_order), figsize=(min(4 + 0.3 * sum(widths), 18), 5),
+                             gridspec_kw={"width_ratios": widths}, sharey=True)
+    for ax, comp in zip(axes, plot_order):
         order = df.groupby(comp)["yield"].median().sort_values(ascending=False).index
         sns.boxplot(data=df, x=comp, y="yield", order=order, ax=ax, color=PALETTE[1],
                     fliersize=1.5, linewidth=0.8, boxprops={"alpha": 0.6})
-        style_axes(ax, LABELS[comp], "Yield (%)" if comp == "ligand" else "", "")
+        style_axes(ax, LABELS[comp], "Yield (%)" if comp == plot_order[0] else "", "")
         ax.tick_params(axis="x", rotation=90, labelsize=8)
     fig.suptitle("Yield by condition variable (sorted by median)", x=0.01, ha="left",
                  fontweight="bold")
     fig.tight_layout()
-    fig.savefig(FIG / "eda_yield_by_variable.png", dpi=160)
+    fig.savefig(FIG / f"{pre}eda_yield_by_variable.png", dpi=160)
     plt.close(fig)
 
     # 3. Which variable matters most? Main-effect variance explained ---------
@@ -86,37 +93,44 @@ def main():
         ax.text(v + 0.005, i, f"{v:.0%}", va="center", fontsize=9)
     ax.set_xlim(0, eta.max() * 1.2)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ranked = eta.sort_values(ascending=False).index
     style_axes(ax, "Share of yield variance explained (one-way, η²)", "",
-               "Aryl halide dominates; additive comes second")
+               f"{ranked[0]} matters most; {ranked[1].lower()} comes second")
     ax.grid(False)
     fig.tight_layout()
-    fig.savefig(FIG / "eda_variance_explained.png", dpi=160)
+    fig.savefig(FIG / f"{pre}eda_variance_explained.png", dpi=160)
     plt.close(fig)
     lines += ["## Variance explained by each variable alone (η²)", ""]
     lines += [f"- {k}: {v:.1%}" for k, v in eta.sort_values(ascending=False).items()]
     lines += [f"- Sum of main effects: {eta.sum():.1%} → the remaining "
               f"{1 - eta.sum():.0%} comes from interactions, which is why a model is needed.", ""]
 
-    # 4. Interaction heatmap: ligand x aryl halide ---------------------------
-    pivot = df.pivot_table(index="aryl_halide", columns="ligand", values="yield", aggfunc="mean")
+    # 4. Interaction heatmap: most important variable x ligand -------------
+    by_label = {LABELS[c]: c for c in COMPONENTS}
+    rows = by_label[ranked[0]]
+    cols = "ligand" if rows != "ligand" else by_label[ranked[1]]
+    pivot = df.pivot_table(index=rows, columns=cols, values="yield", aggfunc="mean")
     pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index,
                       pivot.mean().sort_values(ascending=False).index]
-    fig, ax = plt.subplots(figsize=(6.5, 6.5))
+    fig, ax = plt.subplots(figsize=(max(6.5, 0.7 * pivot.shape[1] + 3), max(4, 0.4 * pivot.shape[0] + 1.5)))
     sns.heatmap(pivot, annot=True, fmt=".0f", cmap="Blues", cbar_kws={"label": "Mean yield (%)"},
                 linewidths=0.5, ax=ax)
-    ax.set_xlabel("Ligand")
-    ax.set_ylabel("Aryl halide")
-    ax.set_title("Mean yield: ligand × aryl halide", loc="left")
+    ax.set_xlabel(LABELS[cols])
+    ax.set_ylabel(LABELS[rows])
+    ax.set_title(f"Mean yield: {LABELS[cols].lower()} × {LABELS[rows].lower()}", loc="left")
     fig.tight_layout()
-    fig.savefig(FIG / "eda_ligand_halide_heatmap.png", dpi=160)
+    heatmap_name = "eda_ligand_halide_heatmap.png" if not pre else "eda_heatmap.png"
+    fig.savefig(FIG / f"{pre}{heatmap_name}", dpi=160)
     plt.close(fig)
 
     # Top reactions --------------------------------------------------------
     top = df.nlargest(10, "yield")[COMPONENTS + ["yield"]].round(1)
     lines += ["## Ten highest-yielding reactions", "", top.to_markdown(index=False), ""]
-    (ROOT / "results" / "eda_summary.md").write_text("\n".join(lines))
+    (ROOT / "results" / f"{pre}eda_summary.md").write_text("\n".join(lines))
     print("\n".join(lines))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Phase 1 EDA")
+    parser.add_argument("--dataset", default=DEFAULT_DATASET, choices=list(DATASETS))
+    main(parser.parse_args().dataset)

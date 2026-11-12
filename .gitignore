@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 data/raw/*.xlsx
 .streamlit/secrets.toml
+data/raw/*.csv

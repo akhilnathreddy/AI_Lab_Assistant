@@ -10,9 +10,11 @@ Chemists can spend weeks finding the right reaction conditions. I built an AI la
 • Bayesian optimization reached a top-1% reaction in a median of **14–18 experiments**
 • Random search needs **~68** (median), and still missed in 38% of runs after 100 experiments
 • Running plates of 5 in parallel got there in **~6 rounds**
+• The same code on a second reaction (Suzuki–Miyaura, 3,696 reactions) also took **~18 experiments**, against ~69 for random search
 
 💡 **The honest lesson:** I expected chemistry-aware features (RDKit descriptors, fingerprints) to speed up the search. They didn't: simple one-hot encoding was fastest. Those same features *did* matter when predicting yields for reagents the model had never seen (R² 0.04 → 0.66). Generalizing and searching are different problems.
 
 🔗 Code: <GitHub link> | Live demo: <Streamlit link>
+(Attach results/figures/main_benchmark.png and results/figures/demo.gif.)
 
 #MachineLearning #Chemistry #BayesianOptimization #AIforScience #DrugDiscovery

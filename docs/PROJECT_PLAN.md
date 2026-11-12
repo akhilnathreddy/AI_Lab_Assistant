@@ -2,14 +2,16 @@
 
 An ML system that finds the best reaction conditions in as few experiments as possible. It uses Bayesian optimization on a published high-throughput reaction-yield dataset, so no wet lab is needed.
 
-> **Progress (Nov 2026).** Phases 1–5 are complete (the Suzuki second dataset is
-> still open), and the Phase 6 app is built. Still to do: deploy the app, record
-> the screen capture, add the live-demo link to the README, and publish the post
-> (draft in `docs/linkedin_post.md`). Notebooks were replaced by reproducible
+> **Progress (Nov 2026).** Phases 1–5 are complete, including the Suzuki second
+> dataset. The Phase 6 app is built and a demo GIF is in
+> `results/figures/demo.gif`. Still to do: deploy the app, add the live-demo link
+> to the README, optionally record a narrated video, and publish the post (draft
+> in `docs/linkedin_post.md`). Notebooks were replaced by reproducible
 > scripts in `scripts/`.
 >
 > **Result:** BO found a top-1% reaction in a median of 14–18 experiments, against
-> about 68 for random search (analytic median; mean 96).
+> about 68 for random search (analytic median; mean 96). On Suzuki–Miyaura it took
+> about 18, against about 69.
 
 **Headline result to aim for:** "My optimizer found a top-yielding reaction in about 20 experiments, while random search needed 100+."
 
@@ -152,7 +154,7 @@ def run_bo(lab, X_all, n_init=5, budget=50, seed=0):
 
 - [x] **Chemistry-aware features in BO:** compare one-hot vs RDKit features inside the optimizer. Does chemical knowledge speed up the search?
 - [x] **Batch mode:** suggest 5 experiments at once (for example, with q-EI in BoTorch or a "kriging believer" approach), as real labs run plates in parallel.
-- [ ] **Second dataset:** repeat the benchmark on the Suzuki–Miyaura coupling dataset (Perera et al., *Science* 2018) to show the method generalizes.
+- [x] **Second dataset:** repeat the benchmark on the Suzuki–Miyaura coupling dataset (Perera et al., *Science* 2018) to show the method generalizes.
 - [x] **Exploration vs exploitation:** compare EI with Upper Confidence Bound at different settings and explain the trade-off.
 
 **Done when:** each extension has its own chart and a one-paragraph takeaway, including what didn't work.

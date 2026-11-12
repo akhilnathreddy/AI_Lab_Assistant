@@ -1,4 +1,4 @@
-# EDA summary
+# EDA summary: Buchwald–Hartwig C–N coupling (Ahneman et al., Science 2018)
 
 - Reactions: **3955** (full factorial would be 3960; 5 combinations are absent from the published data)
 - Choices: 4 ligands, 3 bases, 22 additives, 15 aryl halides

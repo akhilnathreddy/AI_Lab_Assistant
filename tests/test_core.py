@@ -84,3 +84,21 @@ def test_experiments_to_target():
     t = experiments_to_target(runs, 90)
     assert t.loc[("m", 0)] == 2 and np.isnan(t.loc[("m", 1)])
     assert random_search_expectation(3955, 40) == pytest.approx(3956 / 41)
+
+
+def test_suzuki_dataset_is_clean():
+    from src.data import components_of, get_spec
+    sz = load_dataset("suzuki_miyaura")
+    comps = components_of(sz)
+    assert comps == list(get_spec("suzuki_miyaura").components)
+    assert len(sz) == 3696 and not sz.duplicated(comps).any()
+    assert [sz[c].nunique() for c in comps] == [4, 3, 11, 7, 4]
+    for enc in ("onehot", "descriptors", "fingerprint"):
+        X, _ = encode(sz, enc)
+        assert X.shape[0] == len(sz) and np.isfinite(X).all()
+
+
+def test_lab_conditions_follow_dataset():
+    sz = load_dataset("suzuki_miyaura")
+    assert set(VirtualLab(sz).conditions(0)) == {"electrophile", "nucleophile", "ligand",
+                                                  "base", "solvent"}
