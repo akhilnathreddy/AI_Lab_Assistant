@@ -40,7 +40,7 @@ Success is measured by how few lookups it takes to reach the top yields.
 | Bayesian optimization | BoTorch + GPyTorch (or scikit-learn `GaussianProcessRegressor`) |
 | Plots | matplotlib / seaborn |
 | Demo app | Streamlit |
-| Tracking (optional) | Weights & Biases or MLflow |
+| Tracking (optional) | Weights & Biases or MLflow (**done: MLflow**, `--track`) |
 
 ---
 

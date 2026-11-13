@@ -6,10 +6,14 @@ Splits
   * halide-out   - GroupKFold over aryl halides: test substrates never seen
 
 Writes results/baseline_metrics.md and results/figures/baseline_r2.png.
-Run from the repository root:  python scripts/02_baseline_model.py
+Run from the repository root:
+    python scripts/02_baseline_model.py                       # train + evaluate
+    python scripts/02_baseline_model.py --track               # ... and log to MLflow
+    python scripts/02_baseline_model.py --from-saved --track  # log saved results only
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -23,6 +27,7 @@ from sklearn.ensemble import RandomForestRegressor  # noqa: E402
 from sklearn.metrics import mean_squared_error, r2_score  # noqa: E402
 from sklearn.model_selection import GroupKFold, ShuffleSplit  # noqa: E402
 
+from src import tracking  # noqa: E402
 from src.data import load_dataset  # noqa: E402
 from src.features import encode  # noqa: E402
 from src.plotting import PALETTE, style_axes  # noqa: E402
@@ -41,21 +46,62 @@ def splits(df):
             yield group, tr, te
 
 
-def main():
+RF_PARAMS = {"n_estimators": 300, "max_features": 0.5, "random_state": 0}
+CSV = ROOT / "results" / "baseline_metrics.csv"
+MD = ROOT / "results" / "baseline_metrics.md"
+FIG = ROOT / "results" / "figures" / "baseline_r2.png"
+
+
+def train_and_evaluate() -> pd.DataFrame:
     df = load_dataset()
     y = df["yield"].to_numpy()
     rows = []
     for enc in ENCODING_LABELS:
         X, _ = encode(df, enc)
         for split, tr, te in splits(df):
-            rf = RandomForestRegressor(n_estimators=300, max_features=0.5,
-                                       random_state=0, n_jobs=2).fit(X[tr], y[tr])
+            rf = RandomForestRegressor(**RF_PARAMS, n_jobs=2).fit(X[tr], y[tr])
             pred = rf.predict(X[te])
-            rows.append({"encoding": enc, "split": split, "r2": r2_score(y[te], pred),
+            rows.append({"encoding": enc, "split": split, "n_features": X.shape[1],
+                         "r2": r2_score(y[te], pred),
                          "rmse": mean_squared_error(y[te], pred) ** 0.5})
             print(rows[-1])
     res = pd.DataFrame(rows)
-    res.to_csv(ROOT / "results" / "baseline_metrics.csv", index=False)
+    res.to_csv(CSV, index=False)
+    return res
+
+
+def track(res: pd.DataFrame) -> None:
+    """Log to MLflow: a parent run plus one child per encoding x split."""
+    experiment = "baseline-models/buchwald_hartwig"
+    with tracking.run(experiment, "random-forest baselines",
+                      params={**RF_PARAMS, "model": "RandomForestRegressor", "folds": 5},
+                      tags={"kind": "baseline-suite"}) as parent:
+        tracking.log_artifacts(parent, [FIG, MD, CSV])
+        for (split, enc), g in res.groupby(["split", "encoding"], sort=False):
+            params = {**RF_PARAMS, "encoding": enc, "split": split, "folds": len(g)}
+            if "n_features" in g:
+                params["n_features"] = int(g["n_features"].iloc[0])
+            with tracking.run(experiment, f"{ENCODING_LABELS[enc]} | {SPLIT_LABELS[split]}",
+                              nested=True, params=params, tags={"kind": "baseline"}) as child:
+                tracking.log_metrics(child, {
+                    "r2_median": g["r2"].median(), "r2_mean": g["r2"].mean(),
+                    "r2_std": g["r2"].std(), "rmse_mean": g["rmse"].mean(),
+                    "rmse_std": g["rmse"].std()})
+                tracking.log_curve(child, "r2_fold", g["r2"].to_numpy())
+                tracking.log_curve(child, "rmse_fold", g["rmse"].to_numpy())
+    print("Logged baseline results to MLflow")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Phase 2 random-forest baselines")
+    parser.add_argument("--track", action="store_true", help="log results to MLflow")
+    parser.add_argument("--from-saved", action="store_true",
+                        help=f"skip training and reuse {CSV.relative_to(ROOT)}")
+    args = parser.parse_args(argv)
+    if args.track and not tracking.available():
+        parser.error("--track needs MLflow: pip install -r requirements-tracking.txt")
+
+    res = pd.read_csv(CSV) if args.from_saved else train_and_evaluate()
 
     agg = res.groupby(["split", "encoding"], sort=False).agg(
         r2_median=("r2", "median"), r2_mean=("r2", "mean"), r2_std=("r2", "std"),
@@ -68,7 +114,7 @@ def main():
         "RMSE (yield %)": [f"{m:.1f} ± {s:.1f}" for m, s in zip(agg.rmse_mean, agg.rmse_std)],
     })
     md = table.to_markdown(index=False)
-    (ROOT / "results" / "baseline_metrics.md").write_text(
+    MD.write_text(
         "# Random-forest yield prediction\n\n"
         "Mean ± std over 5 folds (random: 5 repeated 70/30 splits; unseen-group "
         "splits: 5-fold GroupKFold).\n\n" + md + "\n")
@@ -77,7 +123,9 @@ def main():
     # Figure: median R² per split/encoding (bars) with every fold as a dot.
     # Per-fold R² can be very negative when a held-out group has little
     # variance, so the axis is clipped and clipped folds are drawn at the edge.
-    plot_results(res, ROOT / "results" / "figures" / "baseline_r2.png")
+    plot_results(res, FIG)
+    if args.track:
+        track(res)
 
 
 def plot_results(res: pd.DataFrame, path: Path, floor: float = -1.0) -> None:

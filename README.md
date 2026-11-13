@@ -173,6 +173,28 @@ python -m src.benchmark --dataset suzuki_miyaura --suite main --seeds 10 --budge
 
 The cleaned datasets are committed in `data/processed/`. `python -m src.data` re-downloads and re-cleans them from source.
 
+### Experiment tracking (optional, MLflow)
+
+Every benchmark suite and baseline can be logged to [MLflow](https://mlflow.org). It runs locally, with no account or server: runs go into `mlflow.db` and artifacts into `mlartifacts/`, and both are git-ignored.
+
+```bash
+pip install -r requirements-tracking.txt
+
+python -m src.benchmark --suite main --seeds 30 --track          # run + log
+python -m src.benchmark --suite all --plot-only --track          # log saved results, no re-run
+python scripts/02_baseline_model.py --from-saved --track         # log the Phase 2 baselines
+mlflow ui --backend-store-uri sqlite:///mlflow.db                # browse at http://127.0.0.1:5000
+```
+
+What gets logged:
+
+| MLflow experiment | Parent run (one per suite) | Child runs (one per method) |
+|---|---|---|
+| `benchmark/<dataset>` | dataset, seeds, budget, top-1% threshold; the chart, metrics table and raw CSV as artifacts | method settings (surrogate, acquisition, β, encoding, batch size, noise); `best_at_{10,20,50,100}`, `found_top1_rate`, `median_exps_to_top1`; full learning curves `mean_best_so_far` and `share_found_top1` (one point per experiment) |
+| `baseline-models/buchwald_hartwig` | random-forest settings; the figure, table and CSV | encoding and split; R² and RMSE (median, mean, std) plus per-fold values |
+
+Each run also records the git commit it came from, so any number can be traced back to the exact code. To log to a shared MLflow server or Databricks instead, set `MLFLOW_TRACKING_URI`.
+
 ### Interactive demo
 
 ![Demo: the optimizer finds a top-1% reaction at experiment 10](results/figures/demo.gif)
@@ -205,6 +227,7 @@ src/features.py       one-hot, RDKit-descriptor and Morgan-fingerprint encodings
 src/virtual_lab.py    lookup-based experiment simulator (optional noise)
 src/optimizers.py     random search; BO with GP / RF surrogates, EI / UCB / greedy, batch (kriging believer)
 src/benchmark.py      repeated-seed benchmark suites → results/runs, results/*_metrics.md, figures
+src/tracking.py       optional MLflow logging (--track)
 scripts/01_eda.py     Phase 1 EDA figures + summary (--dataset suzuki_miyaura for the second dataset)
 scripts/02_baseline_model.py   Phase 2 random-forest baselines with realistic splits
 scripts/reproduce.sh  rebuild everything
