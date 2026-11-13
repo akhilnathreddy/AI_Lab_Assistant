@@ -6,3 +6,6 @@ __pycache__/
 data/raw/*.xlsx
 .streamlit/secrets.toml
 data/raw/*.csv
+mlflow.db
+mlartifacts/
+mlruns/

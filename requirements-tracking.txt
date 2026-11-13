@@ -1,0 +1,3 @@
+# Optional: experiment tracking (python -m src.benchmark --track ...)
+-r requirements.txt
+mlflow>=3.0

@@ -5,6 +5,7 @@ Usage (from the repository root)::
     python -m src.benchmark --suite main --seeds 30 --budget 100
     python -m src.benchmark --suite all  --seeds 30
     python -m src.benchmark --dataset suzuki_miyaura --suite main --seeds 30
+    python -m src.benchmark --suite all --plot-only --track   # log saved runs to MLflow
 
 Each suite writes ``results/runs/[<dataset>_]<suite>.csv`` (one row per experiment of
 every run) and ``results/figures/[<dataset>_]<suite>_benchmark.png`` plus a metrics table
@@ -22,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from . import tracking
 from .data import DATASETS, DEFAULT_DATASET, get_spec, load_dataset
 from .features import encode
 from .optimizers import BayesOpt, RandomSearch, Strategy, run_campaign
@@ -173,6 +175,82 @@ def metrics_table(runs: pd.DataFrame, threshold: float,
     return pd.DataFrame(rows)
 
 
+def method_summary(runs: pd.DataFrame, threshold: float,
+                   checkpoints=(10, 20, 50, 100)) -> dict[str, dict[str, float]]:
+    """Numeric per-method metrics (the same quantities as ``metrics_table``)."""
+    budget = runs["experiment"].max()
+    to_target = experiments_to_target(runs, threshold)
+    out = {}
+    for method, g in runs.groupby("method", sort=False):
+        m = {}
+        for c in checkpoints:
+            if c <= budget:
+                best = g[g["experiment"] == c]["best_so_far"]
+                m[f"best_at_{c}_mean"] = best.mean()
+                m[f"best_at_{c}_std"] = best.std()
+        t = to_target.loc[method]
+        m["found_top1_rate"] = t.notna().mean()
+        med = np.median(t.fillna(np.inf))
+        if np.isfinite(med):
+            m["median_exps_to_top1"] = med
+        if t.notna().any():
+            m["mean_exps_to_top1_when_found"] = t.mean()
+        m["final_best_mean"] = g[g["experiment"] == budget]["best_so_far"].mean()
+        out[method] = m
+    return out
+
+
+def method_curves(runs: pd.DataFrame, threshold: float) -> dict[str, dict[str, np.ndarray]]:
+    """Per-method learning curves indexed by experiment number (1..budget)."""
+    to_target = experiments_to_target(runs, threshold)
+    curves = {}
+    for method, g in runs.groupby("method", sort=False):
+        piv = g.pivot(index="experiment", columns="seed", values="best_so_far")
+        t = to_target.loc[method].to_numpy()
+        curves[method] = {
+            "mean_best_so_far": piv.mean(axis=1).to_numpy(),
+            "share_found_top1": np.array([(t <= k).mean() for k in piv.index]),
+        }
+    return curves
+
+
+def spec_params(spec: MethodSpec) -> dict:
+    """Flatten a method's configuration into MLflow parameters."""
+    params = {"method": spec.label, "strategy": type(spec.strategy).__name__,
+              "encoding": spec.encoding, "batch_size": spec.batch_size,
+              "noise_sd": spec.noise_sd}
+    if isinstance(spec.strategy, BayesOpt):
+        params.update(surrogate=spec.strategy.surrogate, acquisition=spec.strategy.acquisition,
+                      xi=spec.strategy.xi, beta=spec.strategy.beta)
+    return params
+
+
+def track_suite(runs: pd.DataFrame, *, suite: str, name: str, dataset: str, title: str,
+                threshold: float, specs: list[MethodSpec], n_init: int) -> None:
+    """Log a finished suite to MLflow: a parent run plus one child per method."""
+    by_label = {s.label: s for s in specs}
+    summary = method_summary(runs, threshold)
+    curves = method_curves(runs, threshold)
+    suite_params = {"dataset": dataset, "suite": suite, "seeds": runs["seed"].nunique(),
+                    "budget": int(runs["experiment"].max()), "n_init": n_init,
+                    "top1_threshold": round(threshold, 3), "n_methods": len(summary)}
+    with tracking.run(f"benchmark/{dataset}", name, params=suite_params,
+                      tags={"title": title, "kind": "benchmark-suite"}) as parent:
+        tracking.log_artifacts(parent, [FIG_DIR / f"{name}_benchmark.png",
+                                        RESULTS_DIR / f"{name}_metrics.md",
+                                        RUNS_DIR / f"{name}.csv"])
+        for method, metrics in summary.items():
+            spec = by_label.get(method)
+            params = spec_params(spec) if spec else {"method": method}
+            with tracking.run(f"benchmark/{dataset}", method, nested=True,
+                              params={**params, **suite_params},
+                              tags={"suite": suite, "kind": "benchmark-method"}) as child:
+                tracking.log_metrics(child, metrics)
+                for key, values in curves[method].items():
+                    tracking.log_curve(child, key, values)
+    print(f"[{name}] logged to MLflow ({len(summary)} methods)")
+
+
 def random_search_expectation(n_total: int, n_good: int) -> float:
     """Expected draws (without replacement) until the first 'good' item."""
     return (n_total + 1) / (n_good + 1)
@@ -240,7 +318,11 @@ def main(argv=None):
     p.add_argument("--n-init", type=int, default=5)
     p.add_argument("--processes", type=int, default=4)
     p.add_argument("--plot-only", action="store_true", help="re-plot saved runs")
+    p.add_argument("--track", action="store_true",
+                   help="log results to MLflow (see src/tracking.py)")
     args = p.parse_args(argv)
+    if args.track and not tracking.available():
+        p.error("--track needs MLflow: pip install -r requirements-tracking.txt")
 
     ds = get_spec(args.dataset)
     data = load_dataset(ds.name)
@@ -274,6 +356,9 @@ def main(argv=None):
         )
         print(md)
         plot_suite(runs, name, threshold, title, lab.global_max)
+        if args.track:
+            track_suite(runs, suite=suite, name=name, dataset=ds.name, title=title,
+                        threshold=threshold, specs=all_suites[suite], n_init=args.n_init)
 
 
 if __name__ == "__main__":
