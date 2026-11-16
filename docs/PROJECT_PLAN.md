@@ -2,12 +2,11 @@
 
 An ML system that finds the best reaction conditions in as few experiments as possible. It uses Bayesian optimization on a published high-throughput reaction-yield dataset, so no wet lab is needed.
 
-> **Progress (Nov 2026).** Phases 1–5 are complete, including the Suzuki second
-> dataset. The Phase 6 app is built and a demo GIF is in
-> `results/figures/demo.gif`. Still to do: deploy the app, add the live-demo link
-> to the README, optionally record a narrated video, and publish the post (draft
-> in `docs/linkedin_post.md`). Notebooks were replaced by reproducible
-> scripts in `scripts/`.
+> **Progress (Nov 2026).** Phases 1–6 are complete, including the Suzuki second
+> dataset and MLflow tracking. The app is live at
+> https://ai-lab-assistant-ml.streamlit.app/ and a demo GIF is in `results/figures/demo.gif`.
+> Still to do: optionally record a narrated video, and publish the LinkedIn post.
+> Notebooks were replaced by reproducible scripts in `scripts/`.
 >
 > **Result:** BO found a top-1% reaction in a median of 14–18 experiments, against
 > about 68 for random search (analytic median; mean 96). On Suzuki–Miyaura it took
@@ -170,8 +169,8 @@ def run_bo(lab, X_all, n_init=5, budget=50, seed=0):
   - The conditions the optimizer just chose and their yield.
   - A live chart of best yield so far, with random search shown for comparison.
   - A sidebar to pick method, encoding, and number of initial experiments.
-- [ ] Deploy it for free on Streamlit Community Cloud or Hugging Face Spaces.
-- [ ] Record a 30–60 second screen capture (GIF or video) of the app finding a high yield.
+- [x] Deploy it for free on Streamlit Community Cloud or Hugging Face Spaces. (Live: https://ai-lab-assistant-ml.streamlit.app/)
+- [x] Record a 30–60 second screen capture (GIF or video) of the app finding a high yield. (GIF: `results/figures/demo.gif`, ~18 s)
 
 **Done when:** the app runs from a public link and you have a short recording for the post.
 
@@ -187,7 +186,7 @@ def run_bo(lab, X_all, n_init=5, budget=50, seed=0):
 - [x] How the virtual lab and optimizer work (a simple diagram helps).
 - [x] Results table and charts.
 - [x] What didn't work and limitations (for example, a virtual lab can't capture real-world noise or new reagents).
-- [ ] How to run it locally, and a link to the live demo.
+- [x] How to run it locally, and a link to the live demo.
 - [x] References.
 
 **LinkedIn post structure:**
