@@ -1,5 +1,7 @@
 # AI Lab Assistant: Bayesian reaction optimization
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ai-lab-assistant-ml.streamlit.app/)
+
 **A Bayesian optimizer that finds a top-1% Buchwald–Hartwig reaction in a median of 14–18 experiments. Random search needs about 68 on average, and still fails in more than a third of runs after 100. The result repeats on a second reaction (Suzuki–Miyaura): about 18 experiments, against about 69.**
 
 ![Bayesian optimization vs random search](results/figures/main_benchmark.png)
@@ -208,15 +210,9 @@ Each run also records the git commit it came from, so any number can be traced b
 - a table of what the model currently believes are the best untested reactions
 - a sidebar to pick the method, encoding, number of initial experiments and plate size
 
-**Live demo:** *add your Streamlit Community Cloud link here*.
+**Live demo: [ai-lab-assistant-ml.streamlit.app](https://ai-lab-assistant-ml.streamlit.app/)** (hosted on Streamlit Community Cloud; the first load can take a few seconds if the app has been asleep).
 
-To deploy it for free:
-1. Merge this branch into `main` on GitHub.
-2. Go to [share.streamlit.io](https://share.streamlit.io) and choose **Create app → Deploy a public app from GitHub**.
-3. Pick this repository, branch `main`, and main file `app/streamlit_app.py`.
-4. Click **Deploy**.
-
-`requirements.txt` and `.streamlit/config.toml` are picked up automatically, and the processed data is committed, so no setup is needed.
+To deploy your own copy, fork the repository, go to [share.streamlit.io](https://share.streamlit.io), choose **Create app**, and point it at branch `main` and main file `app/streamlit_app.py`. `requirements.txt` and `.streamlit/config.toml` are picked up automatically, and the processed data is committed, so no other setup is needed.
 
 ## Repository layout
 
@@ -233,7 +229,7 @@ scripts/02_baseline_model.py   Phase 2 random-forest baselines with realistic sp
 scripts/reproduce.sh  rebuild everything
 app/streamlit_app.py  interactive demo
 tests/                unit tests
-docs/                 project plan with progress, draft LinkedIn post
+docs/                 project plan with progress
 ```
 
 ## References
